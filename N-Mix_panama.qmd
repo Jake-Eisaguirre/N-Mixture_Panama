@@ -57,7 +57,9 @@ cmr_q <- "select l.location, r.region, s.site, v.date, v.survey_time, s2.duratio
           full join visit v on s.site_id = v.site_id 
           join survey s2 on v.visit_id = s2.visit_id 
           join capture c on s2.survey_id = c.survey_id
-          where l.location = 'panama';"
+          where l.location = 'panama'
+          and v.date < '2019-02-01'
+          and v.date > '2017-12-31';"
 
 raw_data <- dbGetQuery(connection, cmr_q) %>% 
   select(!c(location, region, survey_time, duration_minutes)) %>% 
@@ -71,11 +73,15 @@ visit_cmr_q <- "select l.location, r.region, s.site, v.date, v.survey_time
                 join region r on l.location_id = r.location_id
                 join site s on r.region_id = s.region_id 
                 join visit v on s.site_id = v.site_id 
-                where l.location = 'panama';"
+                where l.location = 'panama'
+                and v.date < '2019-02-01'
+                and v.date > '2017-12-31';"
 
 raw_visits <-dbGetQuery(connection, visit_cmr_q) %>% 
   arrange(date) %>% 
-  select(site, date)
+  select(site, date) %>% 
+  group_by(site, date) %>% 
+  distinct()
 
 viz <- raw_visits %>% 
   group_by(site) %>% 
@@ -98,15 +104,14 @@ mid_clean_up <- raw_data %>%
   filter(species_capture %in% c("lithobates_warszewitschii", "silverstoneia_flotator")) %>% 
   group_by(date, site, species_capture) %>% 
   summarise(n = n()) %>% 
-  ungroup() 
+  ungroup()
 
 # populate zeros
 clean_up <- raw_visits %>% 
   left_join(mid_clean_up) %>%
   complete(nesting(date, site), 
            species_capture = unique(mid_clean_up$species_capture), 
-           fill = list(n = 0)) %>% 
-  drop_na()
+           fill = list(n = 0))
 
 
 ```
