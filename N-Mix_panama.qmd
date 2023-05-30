@@ -1,0 +1,152 @@
+---
+title: "n-mix"
+format: html
+editor: visual
+---
+
+## Load Packages
+
+```{r}
+
+if (!require(librarian)){
+  install.packages("librarian")
+  library(librarian)
+}
+
+librarian::shelf(tidyverse, RPostgres, DBI, unmarked, here, lubridate)
+
+```
+
+## Connect to `survey_data` schema in `ribbitr` database
+
+```{r}
+
+tryCatch({
+    drv <- dbDriver("Postgres")
+    print("Connecting to Database…")
+    connection <- dbConnect(drv,
+                 dbname = Sys.getenv("aws_dbname"),
+                 host = Sys.getenv("aws_host"),
+                 port = Sys.getenv("aws_port"),
+                 user = Sys.getenv("aws_user"),
+                 password = Sys.getenv("aws_password"),
+                 timezone=NULL)
+    print("Database Connected!")
+    },
+    error=function(cond) {
+            print("Unable to connect to Database.")
+    })
+
+#search path
+dbExecute(connection, "set search_path to survey_data")
+
+
+
+```
+
+## Query Panama Data
+
+```{r}
+
+# 30 unique dates for visits
+cmr_q <- "select l.location, r.region, s.site, v.date, v.survey_time, s2.duration_minutes, 
+          c.species_capture
+          from location l
+          join region r on l.location_id = r.location_id
+          join site s on r.region_id = s.region_id 
+          full join visit v on s.site_id = v.site_id 
+          join survey s2 on v.visit_id = s2.visit_id 
+          join capture c on s2.survey_id = c.survey_id
+          where l.location = 'panama';"
+
+raw_data <- dbGetQuery(connection, cmr_q) %>% 
+  select(!c(location, region, survey_time, duration_minutes)) %>% 
+  arrange(date)
+
+
+
+# find visits with no captures
+visit_cmr_q <- "select l.location, r.region, s.site, v.date, v.survey_time
+                from location l
+                join region r on l.location_id = r.location_id
+                join site s on r.region_id = s.region_id 
+                join visit v on s.site_id = v.site_id 
+                where l.location = 'panama';"
+
+raw_visits <-dbGetQuery(connection, visit_cmr_q) %>% 
+  arrange(date) %>% 
+  select(site, date)
+
+viz <- raw_visits %>% 
+  group_by(site) %>% 
+  summarise(n = n())
+
+ggplot(data = viz) +
+  geom_col(aes(x=site, y = n)) +
+  ggtitle("Raw Visits") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
+
+## Clean up species list with counts
+
+```{r}
+
+
+
+mid_clean_up <- raw_data %>% 
+  filter(species_capture %in% c("lithobates_warszewitschii", "silverstoneia_flotator")) %>% 
+  group_by(date, site, species_capture) %>% 
+  summarise(n = n()) %>% 
+  ungroup() 
+
+# populate zeros
+clean_up <- raw_visits %>% 
+  left_join(mid_clean_up) %>%
+  complete(nesting(date, site), 
+           species_capture = unique(mid_clean_up$species_capture), 
+           fill = list(n = 0)) %>% 
+  drop_na()
+
+
+```
+
+
+```{r}
+washy <- clean_up %>% 
+  select(site, date, species_capture, n) %>% 
+  filter(species_capture == "lithobates_warszewitschii") %>% 
+  select(!species_capture) %>% 
+  group_by(site) %>% 
+  mutate(n_visit = match(date, unique(date)),
+         n_visit = paste0("visit_", n_visit, sep = "")) %>% 
+  select(!date) %>% 
+  distinct() %>% 
+  ungroup() %>%
+  pivot_wider(names_from = c("n_visit"), values_from = c("n")) %>% 
+  group_by(site) %>% 
+  mutate(across(contains("visit"), 
+                ~ifelse(is.na(.) &
+                          !is.na(lag(.)), 0, .)))
+```
+
+```{r}
+
+washy_unmarked_nmixture <- washy %>% 
+  ungroup() %>% 
+  #filter(capture_type == "new") %>% 
+  select(!c(site)) 
+
+
+umf <- unmarkedFramePCount(y = washy_unmarked_nmixture)
+
+summary(umf)
+
+fm1 <- pcount(~1 ~1, data = umf)
+
+backTransform(fm1, "state") 
+
+backTransform(fm1, "det")
+
+```
+
