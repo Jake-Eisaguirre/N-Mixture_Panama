@@ -178,16 +178,16 @@ spec_list <- unique(nmix_clean$species)
      pivot_wider(id_cols = c("site", "visit_group") ,names_from = c("n_visit"), values_from = c("n", "survey_time")) %>% 
      select(!c(site, visit_group))
    
-   surv_cov <- nmix_clean %>% 
-       filter(species == "silverstoneia_flotator",
-              str_detect(site, "season_1")) %>% 
-      # filter(case_when(survey_time == "day" ~ n_visit %in% c("visit_1", "visit_2"),
-      #                 survey_time == "night" ~ n_visit %in% c("visit_1", "visit_2", "visit_3", "visit_4"))) %>%
-     pivot_wider(id_cols = c("site", "visit_group") , names_from = c("n_visit"), values_from = c("survey_time")) %>% 
-     select(!c(site, visit_group))
+   # surv_cov <- nmix_clean %>% 
+   #     filter(species == "silverstoneia_flotator",
+   #            str_detect(site, "season_1")) %>% 
+   #    # filter(case_when(survey_time == "day" ~ n_visit %in% c("visit_1", "visit_2"),
+   #    #                 survey_time == "night" ~ n_visit %in% c("visit_1", "visit_2", "visit_3", "visit_4"))) %>%
+   #   pivot_wider(id_cols = c("site", "visit_group") , names_from = c("n_visit"), values_from = c("survey_time")) %>% 
+   #   select(!c(site, visit_group))
      
-   umf <- unmarkedFramePCount(y = table,
-                              obsCovs = list(survey_time = surv_cov))
+   umf <- unmarkedFramePCount(y = table[1:4],
+                              obsCovs = list(survey_time = table[5:8]))
    
    fm1 <- pcount(~survey_time ~ 1,
                  data = umf,
