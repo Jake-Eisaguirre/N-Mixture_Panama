@@ -1,10 +1,4 @@
 ---
-title: "n-mix"
-format: html
-editor: source
----
-
----
 title: "n-mix_panama"
 format: html
 editor: visual
@@ -22,6 +16,9 @@ if (!require(librarian)){
 librarian::shelf(tidyverse, RPostgres, DBI, unmarked, here, lubridate, kableExtra, GGally, MuMIn, AHMbook, AICcmodavg, openxlsx)
 
 ```
+
+
+# Wrangle Data
 
 ## Connect to `survey_data` schema in `ribbitr` database
 
@@ -61,8 +58,7 @@ join visit v on s.site_id = v.site_id
 join survey s2 on v.visit_id = s2.visit_id 
 join capture v2 on s2.survey_id = v2.survey_id
 where l.location = 'panama'
-and v2.life_stage = 'adult'
-and v.survey_time = 'day';"
+and v2.life_stage = 'adult';"
 
 nmix_raw_data_c <- dbGetQuery(connection, n_mix_q_c) %>% 
   select(!c(region, location, life_stage)) %>%
@@ -80,15 +76,14 @@ join visit v on s.site_id = v.site_id
 join survey s2 on v.visit_id = s2.visit_id 
 join ves v2 on s2.survey_id = v2.survey_id
 where l.location = 'panama'
-and v2.life_stage = 'adult'
-and v.survey_time = 'day';"
+and v2.life_stage = 'adult';"
 
 nmix_raw_data_v <- dbGetQuery(connection, n_mix_q_v) %>% 
   select(!c(region, location, life_stage)) %>%
   mutate(count = replace_na(count, 1)) %>% 
   filter(!count == 100) %>% 
   arrange(date) %>% 
-  group_by(site, date, species_ves) %>% 
+  group_by(site, date, survey_time, species_ves) %>% 
   summarise(n = sum(count)) %>% 
   filter(species_ves %in% c("lithobates_warszewitschii", "silverstoneia_flotator", 
                             "colostethus_panamensis", "rhaebo_haematiticus")) %>% 
@@ -104,27 +99,28 @@ visit_nmix_q <- "select l.location, r.region, s.site, v.date, v.survey_time, s2.
                 join visit v on s.site_id = v.site_id
                 join survey s2 on v.visit_id = s2.visit_id
                 where l.location = 'panama'
-                and s2.detection_type = 'capture'
-                and v.survey_time = 'day';"
+                and s2.detection_type = 'capture';"
+
+ndays <- 2
 
 nmix_raw_visits <-dbGetQuery(connection, visit_nmix_q) %>%
   arrange(date) %>%
-  select(site, date) %>% 
+  select(site, date, survey_time) %>%
   filter(site %in% c("altos_de_piedra", "campana_loop", "cerro_negro", "farallon", "guabal",
                      "jordinal", "mata_ahogado", "medina", "rabbit_stream", "rio_blanco", 
-                     "rio_maria", "rio_tigrero", "sophia_stream", "sora"))
-
-
-# Most common sites where VES was conducted
-site_visits <- nmix_raw_visits %>% 
-  group_by(site) %>% 
-  summarize(n = sum(n()))
-
-
-# silverstoneia_flotator, lithobates_warszewitschii, and colostethus_panamensis most common species
-# species_count <- nmix_raw_data %>% 
-#   group_by(species_capture, survey_time) %>% 
-#   summarize(n = n())
+                     "rio_maria", "rio_tigrero", "sophia_stream", "sora"))  %>% 
+  mutate(month = month(date),
+         season = if_else(month > 8, "season_2", "season_1"),
+         season = if_else(month %in% c(1, 2), "season_2", season),
+         site = paste(site, season, sep = "_"),
+         year = year(date),
+         site = paste(year, site, sep = "_")) %>% 
+  select(!c(month, year)) %>% 
+  mutate(near = (lag(date, default = first(date)) + ndays < date) |> cumsum(), .by = site) %>%  
+  mutate(visit = rep(list(1,2,3,4), length.out = n()), .by = c(site, near)) %>% 
+  mutate(visit_group = cumsum(visit == 1), .by = site) %>% 
+  mutate(n_visit = paste0("visit_", visit, sep = "")) %>% 
+  select(!c(near, visit, season))
 
 ```
 
@@ -132,36 +128,79 @@ site_visits <- nmix_raw_visits %>%
 
 ```{r}
 
+# combine VES and Cap data
 spec_filt <- nmix_raw_data_c %>% 
   filter(species %in% c("lithobates_warszewitschii", "silverstoneia_flotator", 
                             "colostethus_panamensis", "rhaebo_haematiticus")) %>% 
   ungroup() %>% 
-  group_by(date, site, species) %>% 
+  group_by(date, site, species, survey_time) %>% 
   summarise(n = n())  %>% 
   rbind(nmix_raw_data_v) %>% 
   ungroup() %>%
-  group_by(date, site, species) %>% 
+  group_by(date, site, species, survey_time) %>% 
   summarise(n = sum(n)) %>% 
   filter(site %in% c("altos_de_piedra", "campana_loop", "cerro_negro", "farallon", "guabal",
                      "jordinal", "mata_ahogado", "medina", "rabbit_stream", "rio_blanco", 
-                     "rio_maria", "rio_tigrero", "sophia_stream", "sora"))
+                     "rio_maria", "rio_tigrero", "sophia_stream", "sora")) %>% 
+  mutate(month = month(date),
+         season = if_else(month > 8, "season_2", "season_1"),
+         season = if_else(month %in% c(1, 2), "season_2", season),
+         site = paste(site, season, sep = "_"),
+         year = year(date),
+         site = paste(year, site, sep = "_")) %>% 
+  select(!c(month, year, season))
   
 
 
 # populate site zeros
-nmix_clean_up <- nmix_raw_visits %>% 
-  left_join(spec_filt) %>%
-  complete(nesting(date, site),
+nmix_clean <- nmix_raw_visits %>% 
+  left_join(spec_filt, by = c("site", "date", "survey_time")) %>%
+  complete(nesting(date, site, survey_time, visit_group, n_visit),
            species = unique(spec_filt$species),
            fill = list(n = 0)) %>% 
   drop_na(species) %>% 
-  mutate(month = month(date),
-         season = if_else(month > 8, "season_2", "season_1"),
-         season = if_else(month %in% c(1, 2), "season_2", season),
-         site = paste(site, season, sep = "_")) %>% 
-  select(!c(month, season))
+  select(!c(date))
+  
 
 ```
+
+# Season 1 - Loops
+# 2 day time visits
+```{r}
+
+spec_list <- unique(nmix_clean$species)
+
+#for (i in 1:length(spec_list)){
+  
+   table <- nmix_clean %>% 
+     filter(species == "silverstoneia_flotator",
+            str_detect(site, "season_1")) %>% 
+     pivot_wider(id_cols = c("site", "visit_group") ,names_from = c("n_visit"), values_from = c("n", "survey_time")) %>% 
+     select(!c(site, visit_group))
+   
+   surv_cov <- nmix_clean %>% 
+       filter(species == "silverstoneia_flotator",
+              str_detect(site, "season_1")) %>% 
+      # filter(case_when(survey_time == "day" ~ n_visit %in% c("visit_1", "visit_2"),
+      #                 survey_time == "night" ~ n_visit %in% c("visit_1", "visit_2", "visit_3", "visit_4"))) %>%
+     pivot_wider(id_cols = c("site", "visit_group") , names_from = c("n_visit"), values_from = c("survey_time")) %>% 
+     select(!c(site, visit_group))
+     
+   umf <- unmarkedFramePCount(y = table,
+                              obsCovs = list(survey_time = surv_cov))
+   
+   fm1 <- pcount(~survey_time ~ 1,
+                 data = umf,
+                 K=150)
+   
+   backTransform(fm1, type = "state")
+
+#}
+
+
+```
+
+
 
 # Season 2
 
@@ -170,30 +209,32 @@ nmix_clean_up <- nmix_raw_visits %>%
 ### Table Formatting
 
 ```{r}
+
+  filter(str_detect(site, "season_2")) %>% 
+  select(site, date, species, survey_time, n) %>% 
+  filter(species == "rhaebo_haematiticus") %>% 
+  select(!species) %>% 
+
+ndays <- 2
 # 3 visits
 rha_table_3 <- nmix_clean_up %>% 
   filter(str_detect(site, "season_2")) %>% 
-  select(site, date, species, n) %>% 
+  select(site, date, species, survey_time, n) %>% 
   filter(species == "rhaebo_haematiticus") %>% 
   select(!species) %>% 
   mutate(year = year(date),
          site = paste(year, site, sep = "_")) %>% 
-  group_by(site) %>% 
-  mutate(n_visit = match(date, unique(date)),
-         n_visit = paste0("visit_", n_visit, sep = "")) %>% 
-  group_by(site, date) %>% 
-  unique() %>% 
-  ungroup() %>% 
-  select(!date) %>% 
+  mutate(near = (lag(date, default = first(date)) + ndays < date) |> cumsum(), .by = site) %>%  
+  mutate(visit = rep(list(1,2,3,4), length.out = n()), .by = c(site, near)) %>% 
+  mutate(visit_group = cumsum(visit == 1), .by = site) %>% 
+  mutate(n_visit = paste0("visit_", visit, sep = "")) %>% 
+  select(!c(date, survey_time, year, near, visit)) %>% 
   ungroup() %>%
-  pivot_wider(names_from = c("n_visit"), values_from = c("n")) %>% 
-  group_by(site) %>% 
-  mutate(across(contains("visit"), 
-                ~ifelse(is.na(.) &
-                          !is.na(lag(.)), 0, .))) %>% 
-  ungroup() %>%
-  select(!c(site, year, visit_4, visit_5)) %>% 
-  filter(!is.na(visit_3))
+  pivot_wider(id_cols = c("site", "visit_group") ,names_from = c("n_visit"), values_from = c("n")) %>% 
+  drop_na(visit_3) %>% 
+  select(!c(visit_group, site))
+  
+
 
 # 2 visits
 rha_table_2 <- nmix_clean_up %>% 
@@ -232,9 +273,7 @@ rha_umf_3 <- unmarkedFramePCount(y = rha_table_3)
 summary(rha_umf_3)
 
 fm1_rha_3 <- pcount( ~1  ~1, 
-               data = rha_umf_3, 
-               engine = "R",
-               control=list(trace=T, REPORT=5))
+               data = rha_umf_3)
 
 summary(fm1_rha_3)
 
