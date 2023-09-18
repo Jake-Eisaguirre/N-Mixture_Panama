@@ -177,12 +177,13 @@ spec_list <- unique(nmix_clean$species)
 
 lambda_results <- vector('list', length(spec_list))
 detection_results <- vector('list', length(spec_list))
+lam_se <- vector('list', length(spec_list))
 
 
 for (i in 1:length(spec_list)){
   
    table <- nmix_clean %>% 
-     filter(species == "colostethus_panamensis",
+     filter(species == spec_list[i],
             str_detect(site, "season_1")) %>% 
      filter(survey_time %in% c("day_1", "day_2", "night_1")) %>% 
      group_by(site, visit_group) %>% 
@@ -204,11 +205,13 @@ for (i in 1:length(spec_list)){
                  data = umf,
                  K=150)
    
-det <- plogis(coef(fm1, type = "det"))
+  det <- plogis(coef(fm1, type = "det"))
   detection_results[[i]] <- det
   
-  lam <- backTransform(fm1, "state")
-  lambda_results[[i]] <- lam
+   
+  lam_tran <- backTransform(fm1, "state")
+  lam_se[[i]] <- sqrt(lam_tran@covMat)
+  lambda_results[[i]] <- coef(lam_tran)
   
   
   # Error checking during loop
@@ -216,11 +219,18 @@ det <- plogis(coef(fm1, type = "det"))
       
 }
 
-detection_results_season1_ddn <- setNames(detection_results, paste(c(spec_list), "season1_ddn", sep = "_"))
+detection_results_season1_ddn <- setNames(detection_results, paste(c(spec_list), "season1_ddn", sep = "_")) %>% as.data.frame()
 
-lambda_results_season1_ddn <- setNames(lambda_results, paste(c(spec_list), "season1_ddn", sep = "_"))
+lambda_results_season1_ddn <- setNames(lambda_results, paste(c(spec_list))) %>% as.data.frame() %>% 
+  mutate(var = "abundance")
 
+lamb_SE_season1_ddn <- setNames(lam_se, paste(c(spec_list)))%>% as.data.frame() %>% 
+  mutate(var = "SE")
 
+lambda_season1_ddn <- rbind(lambda_results_season1_ddn, lamb_SE_season1_ddn) %>% 
+  mutate(surv_combo = "ddn") %>%
+  relocate(var, .before = 1) %>% 
+  relocate(surv_combo, .before = 1)
 
 
 ```
@@ -246,6 +256,7 @@ spec_list <- unique(nmix_clean$species)
 
 lambda_results <- vector('list', length(spec_list))
 detection_results <- vector('list', length(spec_list))
+lam_se <- vector('list', length(spec_list))
 
 
 for (i in 1:length(spec_list)){
@@ -275,11 +286,13 @@ for (i in 1:length(spec_list)){
                  data = umf,
                  K=150)
    
-det <- plogis(coef(fm1, type = "det"))
+  det <- plogis(coef(fm1, type = "det"))
   detection_results[[i]] <- det
   
-  lam <- backTransform(fm1, "state")
-  lambda_results[[i]] <- lam
+   
+  lam_tran <- backTransform(fm1, "state")
+  lam_se[[i]] <- sqrt(lam_tran@covMat)
+  lambda_results[[i]] <- coef(lam_tran)
   
   
   # Error checking during loop
@@ -287,10 +300,18 @@ det <- plogis(coef(fm1, type = "det"))
       
 }
 
-detection_results_season1_dddn <- setNames(detection_results, paste(c(spec_list), "season1_dddn", sep = "_"))
+detection_results_season1_dddn <- setNames(detection_results, paste(c(spec_list), "season1_dddn", sep = "_")) %>% as.data.frame()
 
-lambda_results_season1_dddn <- setNames(lambda_results, paste(c(spec_list), "season1_dddn", sep = "_"))
+lambda_results_season1_dddn <- setNames(lambda_results, paste(c(spec_list))) %>% as.data.frame() %>% 
+  mutate(var = "abundance")
 
+lamb_SE_season1_dddn <- setNames(lam_se, paste(c(spec_list)))%>% as.data.frame() %>% 
+  mutate(var = "SE")
+
+lambda_season1_dddn <- rbind(lambda_results_season1_dddn, lamb_SE_season1_dddn) %>% 
+  mutate(surv_combo = "dddn") %>%
+  relocate(var, .before = 1) %>% 
+  relocate(surv_combo, .before = 1)
 
 
 
