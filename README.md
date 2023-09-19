@@ -1,0 +1,2 @@
+## N-Mixture_Panama
+This repository contains the script for N-Mixture models with the RIBBiTR Panama data in order to guide survey protocol. The Panama team whats to know if conducting repeat survey visits of three back to back to back day time surveys followed by one night time survey (day, day, day, night) or two back to back day time surveys followed by one night time survey (day, day, night) is best suited for accurate population and detectibility estimates. 
